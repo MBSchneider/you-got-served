@@ -1,0 +1,71 @@
+require 'socket'
+require 'uri'
+
+WEB_ROOT = './public'
+
+CONTENT_TYPE_MAPPING = {
+  'html' => 'text/html',
+  'txt' => 'text/plain',
+  'png' => 'image/png',
+  'jpg' => 'image/jpeg'
+}
+
+DEFAULT_CONTENT_TYPE = 'application/octet-stream'
+
+def content_type(path)
+  ext = File.extname(path).split(".").last
+  CONTENT_TYPE_MAPPING.fetch(ext, DEFAULT_CONTENT_TYPE)
+end
+
+def requested_file(request_line)
+  request_uri = request_line.split(" ")[1]
+  path        = URI.unescape(URI(request_uri).path)
+
+  clean = []
+
+  parts = path.split("/")
+
+  parts.each do |part|
+    next if part.empty? || part == '.'
+    part == '..' ? clean.pop : clean << part
+  end
+
+  File.join(WEB_ROOT, *clean)
+end
+
+server = TCPServer.new('localhost', 3003)
+
+loop do
+  ygs = server.accept
+  request_line = ygs.gets
+  STDERR.puts request_line
+
+  path = requested_file(request_line)
+
+  path = File.join(path, 'index.html') if File.directory?(path)
+
+  if File.exist?(path) && !File.directory?(path)
+    File.open(path, "rb") do |file|
+
+      ygs.puts "HTTP/1.1 200 OK\r\n"
+      ygs.puts "Content-Type: #{content_type(file)}\r\n"
+      ygs.puts "Content-Length: #{file.size}\r\n"
+      ygs.puts "Connection: close\r\n"
+
+      ygs.puts "\r\n"
+
+      IO.copy_stream(file, ygs)
+    end
+  else
+    message = "File not found\n"
+    ygs.puts "HTTP/1.1 404 Not Found\r\n"
+    ygs.puts "Content-Type: text/plain\r\n"
+    ygs.puts "Content-Length: #{message.size}\r\n"
+    ygs.puts "Connection: close\r\n"
+
+    ygs.puts "\r\n"
+
+    ygs.print message
+  end
+  ygs.close
+end
